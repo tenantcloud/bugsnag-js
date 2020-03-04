@@ -32,14 +32,15 @@ class BugsnagReactNative(private val reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod(isBlockingSynchronousMethod = true)
-    private fun configure(): WritableMap {
+    private fun configure(options: ReadableMap): WritableMap {
         return try {
             val client = Bugsnag.getClient()
             bridge = reactContext.getJSModule(RCTDeviceEventEmitter::class.java)
             logger = client.logger
             plugin = client.getPlugin(BugsnagReactNativePlugin::class.java)!!
             plugin.registerForMessageEvents { emitEvent(it) }
-            plugin.configure().toWritableMap()
+            val version = options.getString("version")!!
+            plugin.configure(version).toWritableMap()
         } catch (exc: Throwable) {
             logFailure("configure", exc)
             WritableNativeMap()

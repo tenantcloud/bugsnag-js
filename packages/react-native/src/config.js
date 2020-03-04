@@ -18,7 +18,7 @@ const getPrefixedConsole = () => {
 }
 
 module.exports.load = (NativeClient) => {
-  const nativeOpts = NativeClient.configure()
+  const nativeOpts = NativeClient.configure( {version: "1.2.3"} ) // FIXME supply actual version
 
   // if we don't have any native options, something went wrong
   if (!nativeOpts) throw new Error('[bugsnag] Configuration could not be loaded from native client')
