@@ -70,4 +70,9 @@ RCT_EXPORT_METHOD(getPayloadInfo
   resolve(@{});
 }
 
++ (BOOL)requiresMainQueueSetup
+{
+    return YES;
+}
+
 @end
