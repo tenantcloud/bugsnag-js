@@ -1,7 +1,6 @@
 import React, {Component} from 'react'
 import {StyleSheet, Text, View, NativeModules, Platform} from 'react-native'
 
-import { Platform } from 'react-native'
 var endpoint = Platform.OS === 'ios' ? 'http://localhost:9339' : 'http://10.0.2.2:9339'
 
 import Bugsnag from '@bugsnag/react-native';

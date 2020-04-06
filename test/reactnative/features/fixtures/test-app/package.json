@@ -9,7 +9,7 @@
   "dependencies": {
     "@bugsnag/react-native": "^7.0.0-alpha.56",
     "fsevents": "^2.1.2",
-    "react": "16.6.1",
+    "react": "16.11.0",
     "react-native": "^0.62.1",
     "react-native-config": "^0.11.7"
   },
