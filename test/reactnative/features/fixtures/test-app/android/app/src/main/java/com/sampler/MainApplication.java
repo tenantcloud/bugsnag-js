@@ -7,12 +7,14 @@ import android.content.pm.ApplicationInfo;
 
 import com.facebook.react.ReactApplication;
 import com.lugg.ReactNativeConfig.ReactNativeConfigPackage;
-import com.bugsnag.BugsnagReactNative;
-import com.bugsnag.android.Configuration;
 import com.facebook.react.ReactNativeHost;
 import com.facebook.react.ReactPackage;
 import com.facebook.react.shell.MainReactPackage;
 import com.facebook.soloader.SoLoader;
+
+import com.bugsnag.android.BugsnagPackage;
+import com.bugsnag.android.Bugsnag;
+import com.bugsnag.android.BugsnagReactNativePlugin;
 
 import java.util.Arrays;
 import java.util.List;
@@ -30,7 +32,7 @@ public class MainApplication extends Application implements ReactApplication {
       return Arrays.<ReactPackage>asList(
           new MainReactPackage(),
           new ReactNativeConfigPackage(),
-          BugsnagReactNative.getPackage(),
+          new BugsnagPackage(),
           new CustomMethodsPackage()
       );
     }
@@ -59,12 +61,7 @@ public class MainApplication extends Application implements ReactApplication {
     } catch (NameNotFoundException e) {
       throw new RuntimeException("An error occurred reading .env values", e);
     }
-    Configuration config = new Configuration("my API key!");
-    config.setDetectAnrs(enableANR);
-    if (anrTimeout > 0) {
-      config.setAnrThresholdMs(anrTimeout);
-    }
-    BugsnagReactNative.startWithConfiguration(this, config);
+    Bugsnag.start(this);
     SoLoader.init(this, /* native exopackage */ false);
   }
 }
