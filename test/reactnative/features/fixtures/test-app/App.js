@@ -1,6 +1,19 @@
 import React, {Component} from 'react'
 import {StyleSheet, Text, View, NativeModules, Platform} from 'react-native'
-import bugsnag from './index.js';
+
+import { Platform } from 'react-native'
+var endpoint = Platform.OS === 'ios' ? 'http://localhost:9339' : 'http://10.0.2.2:9339'
+
+import Bugsnag from '@bugsnag/react-native';
+Bugsnag.start({
+  apiKey: '01234567890123456789012345678912',
+  endpoints: {
+    notify: endpoint,
+    sessions: endpoint
+  },
+  autoTrackSessions: false
+});
+
 
 function longStackB(index) {
   if (index < 1200) {
