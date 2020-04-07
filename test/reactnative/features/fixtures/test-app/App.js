@@ -5,7 +5,7 @@ var endpoint = Platform.OS === 'ios' ? 'http://localhost:9339' : 'http://10.0.2.
 
 import Bugsnag from '@bugsnag/react-native';
 Bugsnag.start({
-  apiKey: '01234567890123456789012345678912',
+  apiKey: '4255b156966ee3670ffdc1c42a032c6e',
   endpoints: {
     notify: endpoint,
     sessions: endpoint
