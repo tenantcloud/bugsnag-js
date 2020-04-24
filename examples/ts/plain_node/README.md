@@ -1,4 +1,4 @@
-# TypeScript (Node.js)
+# Plain Node.js (TypeScript)
 
 This is an example project showing how to use `@bugsnag/js` with a basic TypeScript Node.js project.
 
