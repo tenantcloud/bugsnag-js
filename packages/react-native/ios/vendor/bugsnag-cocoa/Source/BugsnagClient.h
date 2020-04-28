@@ -28,241 +28,95 @@
 
 #import "BugsnagConfiguration.h"
 #import "BugsnagMetadata.h"
-#import "BugsnagMetadataStore.h"
 
 @class BugsnagSessionTracker;
 
-@interface BugsnagClient : NSObject <BugsnagMetadataDelegate, BugsnagMetadataStore>
+@interface BugsnagClient : NSObject <BugsnagMetadataDelegate>
 
-- (instancetype _Nonnull)initWithConfiguration:(BugsnagConfiguration *_Nonnull)configuration;
+@property(nonatomic, readwrite, retain)
+    BugsnagConfiguration *_Nullable configuration;
+@property(nonatomic, readwrite, strong) BugsnagMetadata *_Nonnull state;
+@property(nonatomic, readwrite, strong) NSDictionary *_Nonnull details;
+@property(nonatomic, readwrite, strong) NSLock *_Nonnull metadataLock;
+@property(nonatomic, readonly, strong) BugsnagSessionTracker *_Nonnull sessionTracker;
 
-// =============================================================================
-// MARK: - Notify
-// =============================================================================
+@property(readonly) BOOL started;
 
-/** Send a custom or caught exception to Bugsnag.
- *
- * The exception will be sent to Bugsnag in the background allowing your
- * app to continue running.
- *
- * @param exception  The exception.
- */
-- (void)notify:(NSException *_Nonnull)exception;
+- (instancetype _Nonnull)initWithConfiguration:
+    (BugsnagConfiguration *_Nonnull)configuration;
+- (void)start;
 
-/**
- *  Send a custom or caught exception to Bugsnag
- *
- *  @param exception The exception
- *  @param block     A block for optionally configuring the error report
- */
-- (void)notify:(NSException *_Nonnull)exception
-         block:(BugsnagOnErrorBlock _Nullable)block;
+- (void)startSession;
+- (void)pauseSession;
+- (BOOL)resumeSession;
+
+- (BOOL)appCrashedLastLaunch;
 
 /**
- *  Send an error to Bugsnag
+ *  Notify Bugsnag of an exception
  *
- *  @param error The error
+ *  @param exception the exception
+ *  @param block     Configuration block for adding additional report
+ * information
  */
-- (void)notifyError:(NSError *_Nonnull)error;
+- (void)notifyException:(NSException *_Nonnull)exception
+                  block:(BugsnagOnErrorBlock _Nullable)block;
 
 /**
- *  Send an error to Bugsnag
+ *  Notify Bugsnag of an exception
  *
- *  @param error The error
- *  @param block A block for optionally configuring the error report
+ *  @param exception the exception
+ *  @param severity  the severity
+ *  @param block     Configuration block for adding additional report
+ * information
+ */
+- (void)notifyException:(NSException *_Nonnull)exception
+             atSeverity:(BSGSeverity)severity
+                  block:(BugsnagOnErrorBlock _Nullable)block;
+
+/**
+ *  Notify Bugsnag of an exception. Only intended for React Native/Unity use.
+ *
+ *  @param exception the exception
+ *  @param metadata  the metadata
+ *  @param block     Configuration block for adding additional report
+ * information
+ */
+- (void)internalClientNotify:(NSException *_Nonnull)exception
+                    withData:(NSDictionary *_Nullable)metadata
+                       block:(BugsnagOnErrorBlock _Nullable)block;
+
+/**
+ *  Notify Bugsnag of an error
+ *
+ *  @param error the error
+ *  @param block Configuration block for adding additional report information
  */
 - (void)notifyError:(NSError *_Nonnull)error
               block:(BugsnagOnErrorBlock _Nullable)block;
 
-// =============================================================================
-// MARK: - Breadcrumbs
-// =============================================================================
-
 /**
- * Leave a "breadcrumb" log message, representing an action that occurred
- * in your app, to aid with debugging.
+ *  Add a breadcrumb
  *
- * @param message  the log message to leave
+ *  @param block configuration block
  */
-- (void)leaveBreadcrumbWithMessage:(NSString *_Nonnull)message;
+- (void)addBreadcrumbWithBlock:
+    (void (^_Nonnull)(BugsnagBreadcrumb *_Nonnull))block;
 
 /**
- *  Leave a "breadcrumb" log message each time a notification with a provided
- *  name is received by the application
- *
- *  @param notificationName name of the notification to capture
+ * Clear all stored breadcrumbs.
  */
-- (void)leaveBreadcrumbForNotificationName:(NSString *_Nonnull)notificationName;
+- (void)clearBreadcrumbs;
 
 /**
- * Leave a "breadcrumb" log message, representing an action that occurred
- * in your app, to aid with debugging, along with additional metadata and
- * a type.
+ *  Listen for notifications and attach breadcrumbs when received
  *
- * @param message The log message to leave.
- * @param metadata Additional metadata included with the breadcrumb.
- * @param type A BSGBreadcrumbTypeValue denoting the type of breadcrumb.
+ *  @param notificationName name of the notification
  */
-- (void)leaveBreadcrumbWithMessage:(NSString *_Nonnull)message
-                          metadata:(NSDictionary *_Nullable)metadata
-                           andType:(BSGBreadcrumbType)type
-NS_SWIFT_NAME(leaveBreadcrumb(_:metadata:type:));
-
-// =============================================================================
-// MARK: - Session
-// =============================================================================
+- (void)crumbleNotification:(NSString *_Nonnull)notificationName;
 
 /**
- * Starts tracking a new session.
- *
- * By default, sessions are automatically started when the application enters the foreground.
- * If you wish to manually call startSession at
- * the appropriate time in your application instead, the default behaviour can be disabled via
- * autoTrackSessions.
- *
- * Any errors which occur in an active session count towards your application's
- * stability score. You can prevent errors from counting towards your stability
- * score by calling pauseSession and resumeSession at the appropriate
- * time in your application.
- *
- * @see pauseSession:
- * @see resumeSession:
+ * Enable or disable crash reporting based on configuration state
  */
-- (void)startSession;
-
-/**
- * Stops tracking a session.
- *
- * When a session is stopped, errors will not count towards your application's
- * stability score. This can be advantageous if you do not wish these calculations to
- * include a certain type of error, for example, a crash in a background service.
- * You should disable automatic session tracking via autoTrackSessions if you call this method.
- *
- * A stopped session can be resumed by calling resumeSession,
- * which will make any subsequent errors count towards your application's
- * stability score. Alternatively, an entirely new session can be created by calling startSession.
- *
- * @see startSession:
- * @see resumeSession:
- */
-- (void)pauseSession;
-
-/**
- * Resumes a session which has previously been stopped, or starts a new session if none exists.
- *
- * If a session has already been resumed or started and has not been stopped, calling this
- * method will have no effect. You should disable automatic session tracking via
- * autoTrackSessions if you call this method.
- *
- * It's important to note that sessions are stored in memory for the lifetime of the
- * application process and are not persisted on disk. Therefore calling this method on app
- * startup would start a new session, rather than continuing any previous session.
- *
- * You should call this at the appropriate time in your application when you wish to
- * resume a previously started session. Any subsequent errors which occur in your application
- * will be reported to Bugsnag and will count towards your application's stability score.
- *
- * @see startSession:
- * @see pauseSession:
- *
- * @return true if a previous session was resumed, false if a new session was started.
- */
-- (BOOL)resumeSession;
-
-// =============================================================================
-// MARK: - onSession
-// =============================================================================
-
-/**
-* Add a callback that would be invoked before a session is sent to Bugsnag.
-*
-* @param block The block to be added.
-*/
-- (void)addOnSessionBlock:(BugsnagOnSessionBlock _Nonnull)block
-    NS_SWIFT_NAME(addOnSession(block:));
-
-/**
- * Remove a callback that would be invoked before a session is sent to Bugsnag.
- *
- * @param block The block to be removed.
- */
-- (void)removeOnSessionBlock:(BugsnagOnSessionBlock _Nonnull )block
-    NS_SWIFT_NAME(removeOnSession(block:));
-
-// =============================================================================
-// MARK: - Other methods
-// =============================================================================
-
-/**
- * Retrieves the context - a general summary of what was happening in the application
- */
- @property NSString *_Nullable context;
-
-/**
- * @return YES if Bugsnag has been started and the previous launch crashed
- */
-- (BOOL)appDidCrashLastLaunch;
-
-// =============================================================================
-// MARK: - User
-// =============================================================================
-
-/**
- * The current user
- */
-- (BugsnagUser *_Nonnull)user;
-
-/**
- *  Set user metadata
- *
- *  @param userId ID of the user
- *  @param name   Name of the user
- *  @param email  Email address of the user
- */
-- (void)setUser:(NSString *_Nullable)userId
-      withEmail:(NSString *_Nullable)email
-        andName:(NSString *_Nullable)name;
-
-// =============================================================================
-// MARK: - onSend
-// =============================================================================
-
-/**
- *  Add a callback to be invoked before a report is sent to Bugsnag, to
- *  change the report contents as needed
- *
- *  @param block A block which returns YES if the report should be sent
- */
-- (void)addOnSendErrorBlock:(BugsnagOnSendErrorBlock _Nonnull)block
-    NS_SWIFT_NAME(addOnSendError(block:));
-
-/**
- * Remove an onSend callback, if it exists
- *
- * @param block The block to remove
- */
-- (void)removeOnSendErrorBlock:(BugsnagOnSendErrorBlock _Nonnull)block
-    NS_SWIFT_NAME(removeOnSendError(block:));
-
-// =============================================================================
-// MARK: - onBreadcrumb
-// =============================================================================
-
-/**
- *  Add a callback to be invoked when a breadcrumb is captured by Bugsnag, to
- *  change the breadcrumb contents as needed
- *
- *  @param block A block which returns YES if the breadcrumb should be captured
- */
-- (void)addOnBreadcrumbBlock:(BugsnagOnBreadcrumbBlock _Nonnull)block
-    NS_SWIFT_NAME(addOnBreadcrumb(block:));
-
-/**
- * Remove the callback that would be invoked when a breadcrumb is captured.
- *
- * @param block The block to be removed.
- */
-- (void)removeOnBreadcrumbBlock:(BugsnagOnBreadcrumbBlock _Nonnull)block
-    NS_SWIFT_NAME(removeOnBreadcrumb(block:));
-
+- (void)updateCrashDetectionSettings;
 @end

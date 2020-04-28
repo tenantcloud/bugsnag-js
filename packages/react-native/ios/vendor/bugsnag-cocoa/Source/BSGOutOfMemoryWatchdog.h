@@ -1,7 +1,5 @@
 #import <Foundation/Foundation.h>
 
-#define PLATFORM_WORD_SIZE sizeof(void*)*8
-
 @class BugsnagConfiguration;
 
 @interface BSGOutOfMemoryWatchdog : NSObject

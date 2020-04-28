@@ -8,19 +8,20 @@
 
 #import "BugsnagEvent.h"
 
-@interface BugsnagThreadSerializationTest : XCTestCase
+@interface BugsnagThreadTest : XCTestCase
 @end
 
 @interface BugsnagEvent ()
-- (NSDictionary *)toJson;
-- (instancetype)initWithKSReport:(NSDictionary *)report;
+- (NSArray *)serializeThreadsWithException:(NSMutableDictionary *)exception;
+
+@property(nonatomic, readonly, copy, nullable) NSArray *threads;
 @end
 
-@implementation BugsnagThreadSerializationTest
+@implementation BugsnagThreadTest
 
 - (void)testEmptyThreads {
-    BugsnagEvent *event = [self generateReportWithThreads:@[]];
-    NSArray *threads = [event toJson][@"threads"];
+    BugsnagEvent *report = [self generateReportWithThreads:@[]];
+    NSArray *threads = [report serializeThreadsWithException:nil];
     XCTAssertTrue(threads.count == 0);
 }
 
@@ -62,27 +63,28 @@
             },
     ];
 
-    BugsnagEvent *event = [self generateReportWithThreads:trace];
-    NSArray *threads = [event toJson][@"threads"];
+    BugsnagEvent *report = [self generateReportWithThreads:trace];
+    NSArray *threads = [report serializeThreadsWithException:nil];
     XCTAssertTrue(threads.count == 2);
 
     // first thread is crashed, should be serialised and contain 'errorReportingThread' flag
     NSDictionary *firstThread = threads[0];
-    XCTAssertEqualObjects(@"0", firstThread[@"id"]);
+    XCTAssertEqualObjects(@0, firstThread[@"id"]);
     XCTAssertEqualObjects(@"cocoa", firstThread[@"type"]);
     XCTAssertNotNil(firstThread[@"stacktrace"]);
     XCTAssertTrue(firstThread[@"errorReportingThread"]);
 
     // second thread is not crashed, should not contain 'errorReportingThread' flag
     NSDictionary *secondThread = threads[1];
-    XCTAssertEqualObjects(@"1", secondThread[@"id"]);
+    XCTAssertEqualObjects(@1, secondThread[@"id"]);
     XCTAssertEqualObjects(@"cocoa", secondThread[@"type"]);
     XCTAssertNotNil(secondThread[@"stacktrace"]);
-    XCTAssertFalse([secondThread[@"errorReportingThread"] boolValue]);
+    XCTAssertNil(secondThread[@"errorReportingThread"]);
 }
 
 - (BugsnagEvent *)generateReportWithThreads:(NSArray *)threads {
     return [[BugsnagEvent alloc] initWithKSReport:@{@"crash": @{@"threads": threads}}];
 }
+
 
 @end

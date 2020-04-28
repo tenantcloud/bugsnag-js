@@ -14,7 +14,6 @@
 #import "BugsnagSink.h"
 #import "BugsnagConfiguration.h"
 #import "Bugsnag.h"
-#import "BugsnagErrorTypes.h"
 
 NSUInteger const BSG_MAX_STORED_REPORTS = 12;
 
@@ -25,14 +24,12 @@ NSUInteger const BSG_MAX_STORED_REPORTS = 12;
         onCrash:(BSGReportCallback)onCrash
 {
     BugsnagSink *sink = [[BugsnagSink alloc] initWithApiClient:apiClient];
-    BSG_KSCrash *ksCrash = [BSG_KSCrash sharedInstance];
-    ksCrash.sink = sink;
-    ksCrash.introspectMemory = YES;
-    ksCrash.deleteBehaviorAfterSendAll =
+    [BSG_KSCrash sharedInstance].sink = sink;
+    [BSG_KSCrash sharedInstance].introspectMemory = YES;
+    [BSG_KSCrash sharedInstance].deleteBehaviorAfterSendAll =
         BSG_KSCDeleteOnSuccess;
-    ksCrash.onCrash = onCrash;
-    ksCrash.maxStoredReports = BSG_MAX_STORED_REPORTS;
-    ksCrash.threadTracingEnabled = (int) config.sendThreads;
+    [BSG_KSCrash sharedInstance].onCrash = onCrash;
+    [BSG_KSCrash sharedInstance].maxStoredReports = BSG_MAX_STORED_REPORTS;
     
     // User reported events are *always* handled
     BSG_KSCrashType crashTypes = BSG_KSCrashTypeUserReported;
@@ -40,15 +37,15 @@ NSUInteger const BSG_MAX_STORED_REPORTS = 12;
     // If Bugsnag is autodetecting errors then the types of event detected is configurable
     // (otherwise it's just the user reported events)
     if (config.autoDetectErrors) {
+        BSGErrorType errorTypes = [config enabledErrorTypes];
         // Translate the relevant BSGErrorTypes bitfield into the equivalent BSG_KSCrashType one
-        crashTypes = crashTypes | [self mapKSToBSGCrashTypes:config.enabledErrorTypes];
+        crashTypes = crashTypes | [self mapKSToBSGCrashTypes:errorTypes];
     }
     
     bsg_kscrash_setHandlingCrashTypes(crashTypes);
     
-    if ((![ksCrash install])) {
+    if (![[BSG_KSCrash sharedInstance] install])
         bsg_log_err(@"Failed to install crash handler. No exceptions will be reported!");
-    }
 
     [sink.apiClient flushPendingData];
 }
@@ -58,15 +55,17 @@ NSUInteger const BSG_MAX_STORED_REPORTS = 12;
  * OOMs are dealt with exclusively in the Bugsnag layer so omitted from consideration here.
  * User reported events should always be included and so also not dealt with here.
  *
- * @param errorTypes The enabled error types
+ * @param bsgCrashMask The BSGErrorType bitfield
  * @returns A BSG_KSCrashType equivalent (with the above caveats) to the input
  */
-- (BSG_KSCrashType)mapKSToBSGCrashTypes:(BugsnagErrorTypes *)errorTypes
+- (BSG_KSCrashType)mapKSToBSGCrashTypes:(BSGErrorType)bsgCrashMask
 {
-    return (BSG_KSCrashType) ((errorTypes.unhandledExceptions ? BSG_KSCrashTypeNSException : 0)
-                    | (errorTypes.cppExceptions ? BSG_KSCrashTypeCPPException : 0)
-                    | (errorTypes.signals ? BSG_KSCrashTypeSignal : 0)
-                    | (errorTypes.machExceptions ? BSG_KSCrashTypeMachException : 0));
+    BSG_KSCrashType crashType;
+    crashType = (bsgCrashMask & BSGErrorTypesNSExceptions ? BSG_KSCrashTypeNSException   : 0)
+              | (bsgCrashMask & BSGErrorTypesCPP          ? BSG_KSCrashTypeCPPException  : 0)
+              | (bsgCrashMask & BSGErrorTypesSignals      ? BSG_KSCrashTypeSignal        : 0)
+              | (bsgCrashMask & BSGErrorTypesMach         ? BSG_KSCrashTypeMachException : 0);
+    return crashType;
 }
 
 - (void)reportUserException:(NSString *)reportName

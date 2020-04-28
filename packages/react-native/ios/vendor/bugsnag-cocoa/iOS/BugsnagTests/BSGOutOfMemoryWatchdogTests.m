@@ -14,7 +14,6 @@
 
 @interface BugsnagClient (Testing)
 @property (nonatomic, strong) BSGOutOfMemoryWatchdog *oomWatchdog;
-@property (nonatomic) NSString *codeBundleId;
 @end
 
 @interface BSGOutOfMemoryWatchdog (Testing)
@@ -29,8 +28,9 @@
 
 - (void)setUp {
     [super setUp];
-    BugsnagConfiguration *config = [[BugsnagConfiguration alloc] initWithApiKey:DUMMY_APIKEY_32CHAR_1];
+    BugsnagConfiguration *config = [[BugsnagConfiguration alloc] initWithApiKey:DUMMY_APIKEY_32CHAR_1 error: nil];
     config.autoDetectErrors = NO;
+    config.codeBundleId = @"codeBundleIdHere";
     config.releaseStage = @"MagicalTestingTime";
 
     [Bugsnag startBugsnagWithConfiguration:config];
@@ -46,11 +46,7 @@
  * Test that the generated OOM report values exist and are correct (where that can be tested)
  */
 - (void)testOOMFieldsSetCorrectly {
-    BugsnagClient *client = [Bugsnag client];
-    BSGOutOfMemoryWatchdog *watchdog = [client oomWatchdog];
-
-    client.codeBundleId = @"codeBundleIdHere";
-    NSMutableDictionary *cachedFileInfo = [watchdog cachedFileInfo];
+    NSMutableDictionary *cachedFileInfo = [[[Bugsnag client] oomWatchdog] cachedFileInfo];
     XCTAssertNotNil([cachedFileInfo objectForKey:@"app"]);
     XCTAssertNotNil([cachedFileInfo objectForKey:@"device"]);
     
@@ -60,8 +56,8 @@
     XCTAssertNotNil([app objectForKey:@"inForeground"]);
     XCTAssertNotNil([app objectForKey:@"version"]);
     XCTAssertNotNil([app objectForKey:@"name"]);
-    XCTAssertEqualObjects([app valueForKey:@"codeBundleId"], @"codeBundleIdHere");
-    XCTAssertEqualObjects([app valueForKey:@"releaseStage"], @"MagicalTestingTime");
+    XCTAssertEqual([app valueForKey:@"codeBundleId"], @"codeBundleIdHere");
+    XCTAssertEqual([app valueForKey:@"releaseStage"], @"MagicalTestingTime");
     
     NSMutableDictionary *device = [cachedFileInfo objectForKey:@"device"];
     XCTAssertNotNil([device objectForKey:@"osName"]);
@@ -71,7 +67,7 @@
     XCTAssertNotNil([device objectForKey:@"model"]);
     XCTAssertNotNil([device objectForKey:@"simulator"]);
     XCTAssertNotNil([device objectForKey:@"wordSize"]);
-    XCTAssertEqualObjects([device valueForKey:@"locale"], [[NSLocale currentLocale] localeIdentifier]);
+    XCTAssertEqual([device valueForKey:@"locale"], [[NSLocale currentLocale] localeIdentifier]);
 }
 
 @end

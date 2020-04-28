@@ -2,7 +2,6 @@
 #define BugsnagPlugin_h
 
 @class Bugsnag;
-@class BugsnagClient;
 
 /**
  * Internal interface for adding custom behavior
@@ -15,8 +14,7 @@
  * Loads a plugin with the given Client. When this method is invoked the plugin should
  * activate its behaviour - for example, by capturing an additional source of errors.
 */
-- (void)load:(BugsnagClient *)client;
-
+- (void)load;
 /**
  * Unloads a plugin. When this is invoked the plugin should cease all custom behaviour and
  * restore the application to its unloaded state.

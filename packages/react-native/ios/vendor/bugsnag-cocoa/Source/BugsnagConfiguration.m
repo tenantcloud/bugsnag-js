@@ -27,18 +27,12 @@
 #import "BugsnagConfiguration.h"
 #import "Bugsnag.h"
 #import "BugsnagClient.h"
-#import "BugsnagClientInternal.h"
 #import "BugsnagKeys.h"
 #import "BSG_RFC3339DateTool.h"
 #import "BugsnagUser.h"
 #import "BugsnagSessionTracker.h"
 #import "BugsnagLogger.h"
 #import "BSG_SSKeychain.h"
-#import "BugsnagBreadcrumbs.h"
-#import "BugsnagMetadataStore.h"
-#import "BSGSerialization.h"
-#import "BugsnagEndpointConfiguration.h"
-#import "BugsnagErrorTypes.h"
 
 static NSString *const kHeaderApiPayloadVersion = @"Bugsnag-Payload-Version";
 static NSString *const kHeaderApiKey = @"Bugsnag-Api-Key";
@@ -46,6 +40,7 @@ static NSString *const kHeaderApiSentAt = @"Bugsnag-Sent-At";
 static NSString *const BSGApiKeyError = @"apiKey must be a 32-digit hexadecimal value.";
 static NSString *const BSGInitError = @"Init is unavailable.  Use [[BugsnagConfiguration alloc] initWithApiKey:] instead.";
 static const int BSGApiKeyLength = 32;
+NSString * const BSGConfigurationErrorDomain = @"com.Bugsnag.CocoaNotifier.Configuration";
 
 // User info persistence keys
 NSString * const kBugsnagUserKeychainAccount = @"BugsnagUserKeychainAccount";
@@ -57,97 +52,17 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
 + (BugsnagClient *)client;
 @end
 
-@interface BugsnagMetadata ()
-- (NSDictionary *_Nonnull)toDictionary;
-@end
-
-@interface BugsnagUser ()
-- (instancetype)initWithDictionary:(NSDictionary *)dict;
-- (instancetype)initWithUserId:(NSString *)userId name:(NSString *)name emailAddress:(NSString *)emailAddress;
-- (NSDictionary *)toJson;
+@interface BugsnagClient ()
+@property BugsnagSessionTracker *sessionTracker;
 @end
 
 @interface BugsnagConfiguration ()
-
-/**
- *  Hooks for modifying crash reports before it is sent to Bugsnag
- */
 @property(nonatomic, readwrite, strong) NSMutableArray *onSendBlocks;
-
-/**
- *  Hooks for modifying sessions before they are sent to Bugsnag. Intended for internal use only by React Native/Unity.
- */
 @property(nonatomic, readwrite, strong) NSMutableArray *onSessionBlocks;
-@property(nonatomic, readwrite, strong) NSMutableArray *onBreadcrumbBlocks;
 @property(nonatomic, readwrite, strong) NSMutableSet *plugins;
-@property(readonly, retain, nullable) NSURL *notifyURL;
-@property(readonly, retain, nullable) NSURL *sessionURL;
-
-/**
- *  Additional information about the state of the app or environment at the
- *  time the report was generated
- */
-@property(readwrite, retain, nullable) BugsnagMetadata *metadata;
-
-/**
- *  Meta-information about the state of Bugsnag
- */
-@property(readwrite, retain, nullable) BugsnagMetadata *config;
-
-/**
- *  Rolling snapshots of user actions leading up to a crash report
- */
-@property(readonly, strong, nullable) BugsnagBreadcrumbs *breadcrumbs;
 @end
 
-// =============================================================================
-// MARK: - BugsnagConfiguration
-// =============================================================================
-
 @implementation BugsnagConfiguration
-
-// -----------------------------------------------------------------------------
-// MARK: - <NSCopying>
-// -----------------------------------------------------------------------------
-
-/**
- * Produce a shallow copy of the BugsnagConfiguration object.
- *
- * @param zone This parameter is ignored. Memory zones are no longer used by Objective-C.
- */
-- (nonnull id)copyWithZone:(nullable NSZone *)zone {
-    BugsnagConfiguration *copy = [[BugsnagConfiguration alloc] initWithApiKey:[NSMutableString stringWithString:self.apiKey]];
-    // Omit apiKey - it's set explicitly in the line above
-    [copy setAppType:self.appType];
-    [copy setAppVersion:self.appVersion];
-    [copy setAutoDetectErrors:self.autoDetectErrors];
-    [copy setAutoTrackSessions:self.autoTrackSessions];
-    [copy setBundleVersion:self.bundleVersion];
-    // Skip breadcrumbs - none should have been set
-    [copy setConfig:[[BugsnagMetadata alloc] initWithDictionary:[[self.config toDictionary] mutableCopy]]];
-    [copy setContext:self.context];
-    [copy setEnabledBreadcrumbTypes:self.enabledBreadcrumbTypes];
-    [copy setEnabledErrorTypes:self.enabledErrorTypes];
-    [copy setEnabledReleaseStages:self.enabledReleaseStages];
-    [copy setRedactedKeys:self.redactedKeys];
-    [copy setMaxBreadcrumbs:self.maxBreadcrumbs];
-    [copy setMetadata: [[BugsnagMetadata alloc] initWithDictionary:[[self.metadata toDictionary] mutableCopy]]];
-    [copy setEndpoints:self.endpoints];
-    [copy setOnBreadcrumbBlocks:[self.onBreadcrumbBlocks mutableCopy]];
-    [copy setOnCrashHandler:self.onCrashHandler];
-    [copy setOnSendBlocks:[self.onSendBlocks mutableCopy]];
-    [copy setOnSessionBlocks:[self.onSessionBlocks mutableCopy]];
-    [copy setPersistUser:self.persistUser];
-    [copy setPlugins:[self.plugins copy]];
-    [copy setReleaseStage:self.releaseStage];
-    [copy setSession:[self.session copy]];
-    [copy setSendThreads:self.sendThreads];
-    [copy setUser:self.user.id
-        withEmail:self.user.email
-          andName:self.user.name];
-    
-    return copy;
-}
 
 // -----------------------------------------------------------------------------
 // MARK: - Class Methods
@@ -181,10 +96,15 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
 /**
  * The designated initializer.
  */
-- (instancetype _Nonnull)initWithApiKey:(NSString *_Nonnull)apiKey
+-(instancetype)initWithApiKey:(NSString *)apiKey
+                        error:(NSError * _Nullable __autoreleasing * _Nullable)error
 {
-    if (![BugsnagConfiguration isValidApiKey:apiKey]) {
-        bsg_log_err(@"Invalid configuration. apiKey should be a 32-character hexademical string, got \"%@\"", apiKey);
+    if (! [BugsnagConfiguration isValidApiKey:apiKey]) {
+        *error = [NSError errorWithDomain:BSGConfigurationErrorDomain
+                                     code:BSGConfigurationErrorInvalidApiKey
+                                 userInfo:@{NSLocalizedDescriptionKey : @"Invalid API key.  Should be a 32-digit hex string."}];
+        
+        return nil;
     }
     
     self = [super init];
@@ -192,30 +112,32 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
     _metadata = [[BugsnagMetadata alloc] init];
     _config = [[BugsnagMetadata alloc] init];
     _apiKey = apiKey;
-    _bundleVersion = NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"];
-    _endpoints = [BugsnagEndpointConfiguration new];
     _sessionURL = [NSURL URLWithString:@"https://sessions.bugsnag.com"];
     _autoDetectErrors = YES;
     _notifyURL = [NSURL URLWithString:BSGDefaultNotifyUrl];
     _onSendBlocks = [NSMutableArray new];
     _onSessionBlocks = [NSMutableArray new];
-    _onBreadcrumbBlocks = [NSMutableArray new];
     _plugins = [NSMutableSet new];
-    _enabledReleaseStages = nil;
-    _redactedKeys = @[@"password"];
+    _notifyReleaseStages = nil;
     _breadcrumbs = [BugsnagBreadcrumbs new];
     _autoTrackSessions = YES;
-    _sendThreads = BSGThreadSendPolicyAlways;
     // Default to recording all error types
-    _enabledErrorTypes = [BugsnagErrorTypes new];
+    _enabledErrorTypes = BSGErrorTypesCPP
+                       | BSGErrorTypesMach
+                       | BSGErrorTypesSignals
+                       | BSGErrorTypesNSExceptions;
 
     // Enabling OOM detection only happens in release builds, to avoid triggering
     // the heuristic when killing/restarting an app in Xcode or similar.
     _persistUser = YES;
     // Only gets persisted user data if there is any, otherwise nil
     // persistUser isn't settable until post-init.
-    _user = [self getPersistedUserData];
-    [self setUserMetadataFromUser:_user];
+    _currentUser = [self getPersistedUserData];
+    [self setUserMetadataFromUser:_currentUser];
+    
+    #if !DEBUG
+        _enabledErrorTypes |= BSGErrorTypesOOMs;
+    #endif
 
     if ([NSURLSession class]) {
         _session = [NSURLSession
@@ -227,14 +149,6 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
     #else
         _releaseStage = BSGKeyProduction;
     #endif
-
-#if TARGET_OS_TV
-    _appType = @"tvOS";
-#elif TARGET_IPHONE_SIMULATOR || TARGET_OS_IPHONE
-    _appType = @"iOS";
-#elif TARGET_OS_MAC
-    _appType = @"macOS";
-#endif
     
     return self;
 }
@@ -243,27 +157,23 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
 // MARK: - Instance Methods
 // -----------------------------------------------------------------------------
 
-/**
- *  Whether reports should be sent, based on release stage options
- *
- *  @return YES if reports should be sent based on this configuration
- */
 - (BOOL)shouldSendReports {
-    return self.enabledReleaseStages.count == 0 ||
-           [self.enabledReleaseStages containsObject:self.releaseStage];
+    return self.notifyReleaseStages.count == 0 ||
+           [self.notifyReleaseStages containsObject:self.releaseStage];
 }
 
-- (void)setUser:(NSString *_Nullable)userId
-      withEmail:(NSString *_Nullable)email
-        andName:(NSString *_Nullable)name {
-    _user = [[BugsnagUser alloc] initWithUserId:userId name:name emailAddress:email];
+- (void)setUser:(NSString *)userId
+       withName:(NSString *)userName
+       andEmail:(NSString *)userEmail
+{
+    self.currentUser = [[BugsnagUser alloc] initWithUserId:userId name:userName emailAddress:userEmail];
 
     // Persist the user
     if (_persistUser)
         [self persistUserData];
     
     // Add user info to the metadata
-    [self setUserMetadataFromUser:self.user];
+    [self setUserMetadataFromUser:self.currentUser];
 }
 
 /**
@@ -272,27 +182,14 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
  * @param user A BugsnagUser object containing data to be added to the configuration metadata.
  */
 - (void)setUserMetadataFromUser:(BugsnagUser *)user {
-    [self.metadata addMetadata:user.id withKey:BSGKeyId toSection:BSGKeyUser];
-    [self.metadata addMetadata:user.name         withKey:BSGKeyName  toSection:BSGKeyUser];
-    [self.metadata addMetadata:user.email withKey:BSGKeyEmail toSection:BSGKeyUser];
+    [self.metadata addAttribute:BSGKeyId    withValue:user.userId    toTabWithName:BSGKeyUser];
+    [self.metadata addAttribute:BSGKeyName  withValue:user.name  toTabWithName:BSGKeyUser];
+    [self.metadata addAttribute:BSGKeyEmail withValue:user.emailAddress toTabWithName:BSGKeyUser];
 }
 
-// =============================================================================
-// MARK: - onSendBlock
-// =============================================================================
-
-- (void)addOnSendErrorBlock:(BugsnagOnSendErrorBlock _Nonnull)block {
+- (void)addOnSendBlock:(BugsnagOnSendBlock)block {
     [(NSMutableArray *)self.onSendBlocks addObject:[block copy]];
 }
-
-- (void)removeOnSendErrorBlock:(BugsnagOnSendErrorBlock _Nonnull )block
-{
-    [(NSMutableArray *)self.onSendBlocks removeObject:block];
-}
-
-// =============================================================================
-// MARK: - onSessionBlock
-// =============================================================================
 
 - (void)addOnSessionBlock:(BugsnagOnSessionBlock)block {
     [(NSMutableArray *)self.onSessionBlocks addObject:[block copy]];
@@ -302,16 +199,8 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
     [(NSMutableArray *)self.onSessionBlocks removeObject:block];
 }
 
-// =============================================================================
-// MARK: - onBreadcrumbBlock
-// =============================================================================
-
-- (void)addOnBreadcrumbBlock:(BugsnagOnBreadcrumbBlock _Nonnull)block {
-    [(NSMutableArray *)self.onBreadcrumbBlocks addObject:[block copy]];
-}
-
-- (void)removeOnBreadcrumbBlock:(BugsnagOnBreadcrumbBlock _Nonnull)block {
-    [(NSMutableArray *)self.onBreadcrumbBlocks removeObject:block];
+- (void)clearOnSendBlocks {
+    [(NSMutableArray *)self.onSendBlocks removeAllObjects];
 }
 
 - (NSDictionary *)errorApiHeaders {
@@ -330,10 +219,9 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
              };
 }
 
-- (void)setEndpoints:(BugsnagEndpointConfiguration *)endpoints {
-    _endpoints = endpoints;
-    _notifyURL = [NSURL URLWithString:endpoints.notify];
-    _sessionURL = [NSURL URLWithString:endpoints.sessions];
+- (void)setEndpointsForNotify:(NSString *_Nonnull)notify sessions:(NSString *_Nonnull)sessions {
+    _notifyURL = [NSURL URLWithString:notify];
+    _sessionURL = [NSURL URLWithString:sessions];
 
     NSAssert([self isValidUrl:_notifyURL], @"Invalid URL supplied for notify endpoint");
 
@@ -377,11 +265,10 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
         NSString *name = [BSG_SSKeychain passwordForService:kBugsnagUserName account:kBugsnagUserKeychainAccount];
         NSString *userId = [BSG_SSKeychain passwordForService:kBugsnagUserUserId account:kBugsnagUserKeychainAccount];
 
-        if (email || name || userId) {
+        if (email || name || userId)
             return [[BugsnagUser alloc] initWithUserId:userId name:name emailAddress:email];
-        } else {
-            return [[BugsnagUser alloc] initWithUserId:nil name:nil emailAddress:nil];
-        }
+        
+        return nil;
     }
 }
 
@@ -391,10 +278,10 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
  */
 - (void)persistUserData {
     @synchronized(self) {
-        if (_user) {
+        if (_currentUser) {
             // Email
-            if (_user.email) {
-                [BSG_SSKeychain setPassword:_user.email
+            if (_currentUser.emailAddress) {
+                [BSG_SSKeychain setPassword:_currentUser.emailAddress
                              forService:kBugsnagUserEmailAddress
                                 account:kBugsnagUserKeychainAccount];
             }
@@ -404,8 +291,8 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
             }
 
             // Name
-            if (_user.name) {
-                [BSG_SSKeychain setPassword:_user.name
+            if (_currentUser.name) {
+                [BSG_SSKeychain setPassword:_currentUser.name
                              forService:kBugsnagUserName
                                 account:kBugsnagUserKeychainAccount];
             }
@@ -415,8 +302,8 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
             }
             
             // UserId
-            if (_user.id) {
-                [BSG_SSKeychain setPassword:_user.id
+            if (_currentUser.userId) {
+                [BSG_SSKeychain setPassword:_currentUser.userId
                              forService:kBugsnagUserUserId
                                 account:kBugsnagUserKeychainAccount];
             }
@@ -448,46 +335,7 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
 }
 
 - (void)setMaxBreadcrumbs:(NSUInteger)capacity {
-    if (capacity <= 100) {
-        self.breadcrumbs.capacity = capacity;
-    } else {
-        bsg_log_err(@"Invalid configuration value detected. Option maxBreadcrumbs "
-                    "should be an integer between 0-100. Supplied value is %lu", (unsigned long) capacity);
-    }
-}
-
-/**
- * Specific types of breadcrumb should be recorded if either enabledBreadcrumbTypes
- * is None, or contains the type.
- *
- * @param type The breadcrumb type to test
- * @returns Whether to record the breadcrumb
- */
-- (BOOL)shouldRecordBreadcrumbType:(BSGBreadcrumbType)type {
-    // enabledBreadcrumbTypes is BSGEnabledBreadcrumbTypeNone
-    if (!self.enabledBreadcrumbTypes) {
-        return YES;
-    }
-    
-    switch (type) {
-        case BSGBreadcrumbTypeManual:
-            return YES;
-        case BSGBreadcrumbTypeError :
-            return self.enabledBreadcrumbTypes & BSGEnabledBreadcrumbTypeError;
-        case BSGBreadcrumbTypeLog:
-            return self.enabledBreadcrumbTypes & BSGEnabledBreadcrumbTypeLog;
-        case BSGBreadcrumbTypeNavigation:
-            return self.enabledBreadcrumbTypes & BSGEnabledBreadcrumbTypeNavigation;
-        case BSGBreadcrumbTypeProcess:
-            return self.enabledBreadcrumbTypes & BSGEnabledBreadcrumbTypeProcess;
-        case BSGBreadcrumbTypeRequest:
-            return self.enabledBreadcrumbTypes & BSGEnabledBreadcrumbTypeRequest;
-        case BSGBreadcrumbTypeState:
-            return self.enabledBreadcrumbTypes & BSGEnabledBreadcrumbTypeState;
-        case BSGBreadcrumbTypeUser:
-            return self.enabledBreadcrumbTypes & BSGEnabledBreadcrumbTypeUser;
-    }
-    return NO;
+    self.breadcrumbs.capacity = capacity;
 }
 
 // MARK: -
@@ -506,30 +354,56 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
         [self willChangeValueForKey:key];
         _releaseStage = newReleaseStage;
         [self didChangeValueForKey:key];
-        [self.config addMetadata:newReleaseStage
-                         withKey:BSGKeyReleaseStage
-                       toSection:BSGKeyConfig];
+        [self.config addAttribute:BSGKeyReleaseStage
+                        withValue:newReleaseStage
+                    toTabWithName:BSGKeyConfig];
     }
 }
 
 // MARK: -
 
-@synthesize enabledReleaseStages = _enabledReleaseStages;
+@synthesize autoDetectErrors = _autoDetectErrors;
 
-- (NSArray *)enabledReleaseStages {
+- (BOOL)autoDetectErrors {
+    return _autoDetectErrors;
+}
+
+- (void)setAutoDetectErrors:(BOOL)autoDetectErrors {
+    if (autoDetectErrors == _autoDetectErrors) {
+        return;
+    }
+    [self willChangeValueForKey:NSStringFromSelector(@selector(autoDetectErrors))];
+    _autoDetectErrors = autoDetectErrors;
+    [[Bugsnag client] updateCrashDetectionSettings];
+    [self didChangeValueForKey:NSStringFromSelector(@selector(autoDetectErrors))];
+}
+
+- (BOOL)autoNotify {
+    return self.autoDetectErrors;
+}
+
+- (void)setAutoNotify:(BOOL)autoNotify {
+    self.autoDetectErrors = autoNotify;
+}
+
+// MARK: -
+
+@synthesize notifyReleaseStages = _notifyReleaseStages;
+
+- (NSArray *)notifyReleaseStages {
     @synchronized (self) {
-        return _enabledReleaseStages;
+        return _notifyReleaseStages;
     }
 }
 
-- (void)setEnabledReleaseStages:(NSArray *)newReleaseStages;
+- (void)setNotifyReleaseStages:(NSArray *)newNotifyReleaseStages;
 {
     @synchronized (self) {
-        NSArray *releaseStagesCopy = [newReleaseStages copy];
-        _enabledReleaseStages = releaseStagesCopy;
-        [self.config addMetadata:releaseStagesCopy
-                         withKey:BSGKeyEnabledReleaseStages
-                       toSection:BSGKeyConfig];
+        NSArray *notifyReleaseStagesCopy = [newNotifyReleaseStages copy];
+        _notifyReleaseStages = notifyReleaseStagesCopy;
+        [self.config addAttribute:BSGKeyNotifyReleaseStages
+                        withValue:notifyReleaseStagesCopy
+                    toTabWithName:BSGKeyConfig];
     }
 }
 
@@ -543,7 +417,7 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
     return self.autoTrackSessions;
 }
 
-// MARK: - enabledBreadcrumbTypes
+// MARK: -
 
 - (BSGEnabledBreadcrumbType)enabledBreadcrumbTypes {
     return self.breadcrumbs.enabledBreadcrumbTypes;
@@ -566,9 +440,9 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
 - (void)setContext:(NSString *)newContext {
     @synchronized (self) {
         _context = newContext;
-        [self.config addMetadata:newContext
-                         withKey:BSGKeyContext
-                       toSection:BSGKeyConfig];
+        [self.config addAttribute:BSGKeyContext
+                        withValue:newContext
+                    toTabWithName:BSGKeyConfig];
     }
 }
 
@@ -585,28 +459,9 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
 - (void)setAppVersion:(NSString *)newVersion {
     @synchronized (self) {
         _appVersion = newVersion;
-        [self.config addMetadata:newVersion
-                         withKey:BSGKeyAppVersion
-                       toSection:BSGKeyConfig];
-    }
-}
-
-// MARK: -
-
-@synthesize bundleVersion = _bundleVersion;
-
-- (NSString *)bundleVersion {
-    @synchronized (self) {
-        return _bundleVersion;
-    }
-}
-
-- (void)setBundleVersion:(NSString *)newVersion {
-    @synchronized (self) {
-        _bundleVersion = newVersion;
-        [self.config addMetadata:newVersion
-                         withKey:BSGKeyBundleVersion
-                       toSection:BSGKeyConfig];
+        [self.config addAttribute:BSGKeyAppVersion
+                        withValue:newVersion
+                    toTabWithName:BSGKeyConfig];
     }
 }
 
@@ -630,43 +485,6 @@ NSString * const kBugsnagUserUserId = @"BugsnagUserUserId";
 
 - (void)addPlugin:(id<BugsnagPlugin> _Nonnull)plugin {
     [_plugins addObject:plugin];
-}
-
-// MARK: - <MetadataStore>
-
-- (void)addMetadata:(NSDictionary *_Nonnull)metadata
-          toSection:(NSString *_Nonnull)sectionName
-{
-    [self.metadata addMetadata:metadata toSection:sectionName];
-}
-
-- (void)addMetadata:(id _Nullable)metadata
-            withKey:(NSString *_Nonnull)key
-          toSection:(NSString *_Nonnull)sectionName
-{
-    [self.metadata addMetadata:metadata withKey:key toSection:sectionName];
-}
-
-- (id _Nullable)getMetadataFromSection:(NSString *_Nonnull)sectionName
-                               withKey:(NSString *_Nonnull)key
-{
-    return [self.metadata getMetadataFromSection:sectionName withKey:key];
-}
-
-- (NSDictionary *_Nullable)getMetadataFromSection:(NSString *_Nonnull)sectionName
-{
-    return [self.metadata getMetadataFromSection:sectionName];
-}
-
-- (void)clearMetadataFromSection:(NSString *_Nonnull)sectionName
-{
-    [self.metadata clearMetadataFromSection:sectionName];
-}
-
-- (void)clearMetadataFromSection:(NSString *_Nonnull)sectionName
-                       withKey:(NSString *_Nonnull)key
-{
-    [self.metadata clearMetadataFromSection:sectionName withKey:key];
 }
 
 @end

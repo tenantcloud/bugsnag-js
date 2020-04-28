@@ -6,14 +6,9 @@
 //  Copyright © 2020 Bugsnag. All rights reserved.
 //
 
-#import "Bugsnag.h"
 #import "BugsnagPluginClient.h"
 #import "BugsnagPlugin.h"
 #import "BugsnagLogger.h"
-
-@interface Bugsnag ()
-+ (BugsnagClient *)client;
-@end
 
 @interface BugsnagPluginClient ()
 @property NSSet<id<BugsnagPlugin>> *plugins;
@@ -31,7 +26,7 @@
 - (void)loadPlugins {
     for (id<BugsnagPlugin> plugin in self.plugins) {
         @try {
-            [plugin load:[Bugsnag client]];
+            [plugin load];
         } @catch (NSException *exception) {
             bsg_log_err(@"Failed to load plugin %@, continuing with initialisation.", plugin);
         }

@@ -31,37 +31,14 @@
 #import "BugsnagEvent.h"
 #import "BugsnagMetadata.h"
 #import "BugsnagPlugin.h"
-#import "BugsnagMetadataStore.h"
 
+@class BugsnagBreadcrumbs;
 @class BugsnagUser;
-@class BugsnagEndpointConfiguration;
-@class BugsnagErrorTypes;
-
-/**
- * Controls whether Bugsnag should capture and serialize the state of all threads at the time
- * of an error.
- */
-typedef NS_ENUM(NSInteger, BSGThreadSendPolicy) {
-
-    /**
-     * Threads should be captured for all events.
-     */
-    BSGThreadSendPolicyAlways = 0,
-
-    /**
-     * Threads should be captured for unhandled events only.
-     */
-    BSGThreadSendPolicyUnhandledOnly = 1,
-
-    /**
-     * Threads should never be captured.
-     */
-    BSGThreadSendPolicyNever = 2
-};
 
 /**
  * BugsnagConfiguration error constants
  */
+extern NSString * _Nonnull const BSGConfigurationErrorDomain;
 typedef NS_ENUM(NSInteger, BSGConfigurationErrorCode) {
     BSGConfigurationErrorInvalidApiKey = 0
 };
@@ -69,41 +46,54 @@ typedef NS_ENUM(NSInteger, BSGConfigurationErrorCode) {
 /**
  *  A configuration block for modifying an error report
  *
- *  @param event the error report to be modified
+ *  @param report The default report
  */
-typedef BOOL (^BugsnagOnErrorBlock)(BugsnagEvent *_Nonnull event);
+typedef void (^BugsnagOnErrorBlock)(BugsnagEvent *_Nonnull report);
 
 /**
  *  A handler for modifying data before sending it to Bugsnag.
  *
- * onSendErrorBlocks will be invoked on a dedicated
+ * onSendBlocks will be invoked on a dedicated
  * background queue, which will be different from the queue where the block was originally added.
  *
- *  @param event The event report.
+ *  @param rawEventData The raw event data written at crash time. This
+ *                      includes data added in onError.
+ *  @param reports      The report generated from the rawEventData
  *
- *  @return YES if the event should be sent
+ *  @return YES if the report should be sent
  */
-typedef BOOL (^BugsnagOnSendErrorBlock)(BugsnagEvent *_Nonnull event);
-
-/**
- *  A configuration block for modifying a captured breadcrumb
- *
- *  @param breadcrumb The breadcrumb
- */
-typedef BOOL (^BugsnagOnBreadcrumbBlock)(BugsnagBreadcrumb *_Nonnull breadcrumb);
+typedef bool (^BugsnagOnSendBlock)(NSDictionary *_Nonnull rawEventData,
+                                       BugsnagEvent *_Nonnull reports);
 
 /**
  * A configuration block for modifying a session. Intended for internal usage only.
  *
- * @param session The session about to be delivered
+ * @param sessionPayload The session about to be delivered
  */
-typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
+typedef void(^BugsnagOnSessionBlock)(NSMutableDictionary *_Nonnull sessionPayload);
 
-// =============================================================================
-// MARK: - BugsnagConfiguration
-// =============================================================================
+/**
+ *  A handler for modifying data before sending it to Bugsnag
+ *
+ *  @param rawEventReports The raw event data written at crash time. This
+ *                         includes data added in onError.
+ *  @param report          The default report payload
+ *
+ *  @return the report payload intended to be sent or nil to cancel sending
+ */
+typedef NSDictionary *_Nullable (^BugsnagBeforeNotifyHook)(
+    NSArray *_Nonnull rawEventReports, NSDictionary *_Nonnull report);
 
-@interface BugsnagConfiguration : NSObject <BugsnagMetadataStore>
+typedef NS_OPTIONS(NSUInteger, BSGErrorType) {
+    BSGErrorTypesNone         NS_SWIFT_NAME(None)         = 0,
+    BSGErrorTypesOOMs         NS_SWIFT_NAME(OOMs)         = 1 << 0,
+    BSGErrorTypesNSExceptions NS_SWIFT_NAME(NSExceptions) = 1 << 1,
+    BSGErrorTypesSignals      NS_SWIFT_NAME(Signals)      = 1 << 2,
+    BSGErrorTypesCPP          NS_SWIFT_NAME(CPP)          = 1 << 3,
+    BSGErrorTypesMach         NS_SWIFT_NAME(Mach)         = 1 << 4
+};
+
+@interface BugsnagConfiguration : NSObject
 
 // -----------------------------------------------------------------------------
 // MARK: - Properties
@@ -121,24 +111,11 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 /**
  *  Release stages which are allowed to notify Bugsnag
  */
-@property(readwrite, retain, nullable) NSArray *enabledReleaseStages;
-
-/**
- * Sets which values should be removed from any Metadata objects before
- * sending them to Bugsnag. Use this if you want to ensure you don't send
- * sensitive data such as passwords, and credit card numbers to our
- * servers. Any keys which contain a match will be filtered.
- *
- * By default, redactedKeys is set to ["password"]. Both string literals and regex
- * values can be supplied to this property.
- */
-@property(readwrite, retain, nullable) NSArray<id> *redactedKeys;
-
+@property(readwrite, retain, nullable) NSArray *notifyReleaseStages;
 /**
  *  A general summary of what was occuring in the application
  */
 @property(readwrite, retain, nullable) NSString *context;
-
 /**
  *  The version of the application
  */
@@ -150,19 +127,41 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 @property(readwrite, strong, nonnull) NSURLSession *session;
 
 /**
- * Controls whether Bugsnag should capture and serialize the state of all threads at the time
- * of an error.
- *
- * By default sendThreads is set to BSGThreadSendPolicyAlways. This can be set to
- * BSGThreadSendPolicyNever to disable or BSGThreadSendPolicyUnhandledOnly
- * to only do so for unhandled errors.
+ * The current user
  */
-@property BSGThreadSendPolicy sendThreads;
+@property(retain, nullable) BugsnagUser *currentUser;
+
+/**
+ *  Additional information about the state of the app or environment at the
+ *  time the report was generated
+ */
+@property(readwrite, retain, nullable) BugsnagMetadata *metadata;
+/**
+ *  Meta-information about the state of Bugsnag
+ */
+@property(readwrite, retain, nullable) BugsnagMetadata *config;
+/**
+ *  Rolling snapshots of user actions leading up to a crash report
+ */
+@property(readonly, strong, nullable)
+BugsnagBreadcrumbs *breadcrumbs;
+
+/**
+ *  Hooks for modifying crash reports before it is sent to Bugsnag
+ */
+@property(readonly, strong, nullable)
+    NSArray<BugsnagOnSendBlock> *onSendBlocks;
+
+/**
+ *  Hooks for modifying sessions before they are sent to Bugsnag. Intended for internal use only by React Native/Unity.
+ */
+@property(readonly, strong, nullable)
+NSArray<BugsnagOnSessionBlock> *onSessionBlocks;
 
 /**
  *  Optional handler invoked when an error or crash occurs
  */
-@property void (*_Nullable onCrashHandler)
+@property void (*_Nullable onError)
     (const BSG_KSCrashReportWriter *_Nonnull writer);
 
 /**
@@ -178,24 +177,56 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 @property BOOL autoTrackSessions;
 
 /**
+ * Whether the app should report out of memory events which terminate the app
+ * while the app is in the background. Setting this property has no effect.
+ */
+@property BOOL reportBackgroundOOMs
+    __deprecated_msg("This detection option is unreliable and should no longer be used.");
+
+/**
  * The types of breadcrumbs which will be captured. By default, this is all types.
  */
 @property BSGEnabledBreadcrumbType enabledBreadcrumbTypes;
 
 /**
- * The app's bundleVersion, set from the CFBundleVersion.  Equivalent to `versionCode` on Android.
+ * Retrieves the endpoint used to notify Bugsnag of errors
+ *
+ * NOTE: If you want to set this value, you should do so via setEndpointsForNotify:sessions: instead.
+ *
+ * @see setEndpointsForNotify:sessions:
  */
-@property (readwrite, retain, nullable) NSString *bundleVersion;
-
-@property(retain, nullable) NSString *appType;
+@property(readonly, retain, nullable) NSURL *notifyURL;
 
 /**
- * Sets the maximum number of breadcrumbs which will be stored. Once the threshold is reached,
- * the oldest breadcrumbs will be deleted.
+ * Retrieves the endpoint used to send tracked sessions to Bugsnag
  *
- * By default, 25 breadcrumbs are stored: this can be amended up to a maximum of 100.
+ * NOTE: If you want to set this value, you should do so via setEndpointsForNotify:sessions: instead.
+ *
+ * @see setEndpointsForNotify:sessions:
+ */
+@property(readonly, retain, nullable) NSURL *sessionURL;
+
+@property(retain, nullable) NSString *codeBundleId;
+@property(retain, nullable) NSString *notifierType;
+
+/**
+ * The maximum number of breadcrumbs to keep and sent to Bugsnag.
+ * By default, we'll keep and send the 25 most recent breadcrumb log
+ * messages.
  */
 @property NSUInteger maxBreadcrumbs;
+
+/**
+ * Determines whether app sessions should be tracked automatically. By default this value is true.
+ * If this value is updated after +[Bugsnag start] is called, only subsequent automatic sessions
+ * will be captured.
+ */
+@property BOOL shouldAutoCaptureSessions __deprecated_msg("Use autoTrackSessions instead");
+
+/**
+ *  YES if uncaught exceptions should be reported automatically
+ */
+@property BOOL autoNotify __deprecated_msg("Use autoDetectErrors instead");
 
 /**
  * Whether User information should be persisted to disk between application runs.
@@ -208,10 +239,11 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 // -----------------------------------------------------------------------------
 
 /**
- * A class defining the types of error that are reported. By default,
- * all properties are true.
+ * A bitfield defining the types of error that are reported.
+ * Passed down to KSCrash in BugsnagCrashSentry.
+ * Defaults to all-true
  */
-@property BugsnagErrorTypes *_Nonnull enabledErrorTypes;
+@property BSGErrorType enabledErrorTypes;
 
 /**
  * Required declaration to suppress a superclass designated-initializer error
@@ -221,9 +253,10 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 /**
  * The designated initializer.
  */
-- (instancetype _Nonnull)initWithApiKey:(NSString *_Nonnull)apiKey
+- (instancetype _Nullable)initWithApiKey:(NSString *_Nonnull)apiKey
+                                   error:(NSError *_Nullable *_Nullable)error
     NS_DESIGNATED_INITIALIZER
-    NS_SWIFT_NAME(init(_:));
+    NS_SWIFT_NAME(init(_:)) __attribute__((swift_error(nonnull_error)));
 
 /**
  * Set the endpoints to send data to. By default we'll send error reports to
@@ -233,17 +266,15 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
  * Please note that it is recommended that you set both endpoints. If the notify endpoint is
  * missing, an assertion will be thrown. If the session endpoint is missing, a warning will be
  * logged and sessions will not be sent automatically.
+ *
+ * @param notify the notify endpoint
+ * @param sessions the sessions endpoint
+ *
+ * @throws an assertion if the notify endpoint is not a valid URL
  */
-@property(nonnull, nonatomic) BugsnagEndpointConfiguration *endpoints;
 
-// =============================================================================
-// MARK: - User
-// =============================================================================
-
-/**
- * The current user
- */
-@property(readonly, retain, nonnull) BugsnagUser *user;
+- (void)setEndpointsForNotify:(NSString *_Nonnull)notify
+                     sessions:(NSString *_Nonnull)sessions NS_SWIFT_NAME(setEndpoints(notify:sessions:));
 
 /**
  *  Set user metadata
@@ -253,32 +284,8 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
  *  @param email  Email address of the user
  */
 - (void)setUser:(NSString *_Nullable)userId
-      withEmail:(NSString *_Nullable)email
-        andName:(NSString *_Nullable)name;
-
-// =============================================================================
-// MARK: - onSession
-// =============================================================================
-
-/**
- *  Add a callback to be invoked before a session is sent to Bugsnag.
- *
- *  @param block A block which can modify the session
- */
-- (void)addOnSessionBlock:(BugsnagOnSessionBlock _Nonnull)block
-    NS_SWIFT_NAME(addOnSession(block:));
-
-/**
- * Remove a callback that would be invoked before a session is sent to Bugsnag.
- *
- * @param block The block to be removed.
- */
-- (void)removeOnSessionBlock:(BugsnagOnSessionBlock _Nonnull)block
-    NS_SWIFT_NAME(removeOnSession(block:));
-
-// =============================================================================
-// MARK: - onSend
-// =============================================================================
+       withName:(NSString *_Nullable)name
+       andEmail:(NSString *_Nullable)email;
 
 /**
  *  Add a callback to be invoked before a report is sent to Bugsnag, to
@@ -286,37 +293,36 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
  *
  *  @param block A block which returns YES if the report should be sent
  */
-- (void)addOnSendErrorBlock:(BugsnagOnSendErrorBlock _Nonnull)block
-    NS_SWIFT_NAME(addOnSendError(block:));
+- (void)addOnSendBlock:(BugsnagOnSendBlock _Nonnull)block;
 
 /**
- * Remove the callback that would be invoked before an event is sent.
+ *  Add a callback to be invoked before a session is sent to Bugsnag.
+ *
+ *  @param block A block which can modify the session
+ */
+- (void)addOnSessionBlock:(BugsnagOnSessionBlock _Nonnull)block;
+
+/**
+ * Remove a callback that would be invoked before a session is sent to Bugsnag.
  *
  * @param block The block to be removed.
  */
-- (void)removeOnSendErrorBlock:(BugsnagOnSendErrorBlock _Nonnull)block
-    NS_SWIFT_NAME(removeOnSendError(block:));
-
-// =============================================================================
-// MARK: - onBreadcrumb
-// =============================================================================
+- (void)removeOnSessionBlock:(BugsnagOnSessionBlock _Nonnull )block;
 
 /**
- *  Add a callback to be invoked when a breadcrumb is captured by Bugsnag, to
- *  change the breadcrumb contents as needed
- *
- *  @param block A block which returns YES if the breadcrumb should be captured
+ * Clear all callbacks
  */
-- (void)addOnBreadcrumbBlock:(BugsnagOnBreadcrumbBlock _Nonnull)block
-    NS_SWIFT_NAME(addOnBreadcrumb(block:));
+- (void)clearOnSendBlocks;
 
 /**
- * Remove the callback that would be invoked when a breadcrumb is captured.
+ *  Whether reports shoould be sent, based on release stage options
  *
- * @param block The block to be removed.
+ *  @return YES if reports should be sent based on this configuration
  */
-- (void)removeOnBreadcrumbBlock:(BugsnagOnBreadcrumbBlock _Nonnull)block
-    NS_SWIFT_NAME(removeOnBreadcrumb(block:));
+- (BOOL)shouldSendReports;
+
+- (NSDictionary *_Nonnull)errorApiHeaders;
+- (NSDictionary *_Nonnull)sessionApiHeaders;
 
 - (void)addPlugin:(id<BugsnagPlugin> _Nonnull)plugin;
 

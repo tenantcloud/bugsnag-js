@@ -12,8 +12,6 @@
 #import "BugsnagSessionTrackingPayload.h"
 #import "BugsnagSessionTrackingApiClient.h"
 #import "BugsnagLogger.h"
-#import "BugsnagSessionInternal.h"
-#import "BSG_KSSystemInfo.h"
 
 /**
  Number of seconds in background required to make a new session
@@ -22,41 +20,12 @@ NSTimeInterval const BSGNewSessionBackgroundDuration = 60;
 
 NSString *const BSGSessionUpdateNotification = @"BugsnagSessionChanged";
 
-@interface BugsnagSession ()
-
-@property(readwrite, getter=isStopped) BOOL stopped;
-@property NSUInteger unhandledCount;
-@property NSUInteger handledCount;
-- (NSDictionary *_Nonnull)toDictionary;
-- (void)stop;
-- (void)resume;
-@end
-
-@interface BugsnagConfiguration ()
-@property(readonly, retain, nullable) NSURL *sessionURL;
-@property(nonatomic, readwrite, strong) NSMutableArray *onSessionBlocks;
-@end
-
-@interface BugsnagApp ()
-+ (BugsnagApp *)appWithDictionary:(NSDictionary *)event
-                           config:(BugsnagConfiguration *)config
-                     codeBundleId:(NSString *)codeBundleId;
-@end
-
-@interface BugsnagDevice ()
-+ (BugsnagDevice *)deviceWithDictionary:(NSDictionary *)event;
-@end
-
-@interface BugsnagSessionTrackingApiClient ()
-@property (nonatomic) NSString *codeBundleId;
-@end
-
 @interface BugsnagSessionTracker ()
 @property (weak, nonatomic) BugsnagConfiguration *config;
 @property (strong, nonatomic) BugsnagSessionFileStore *sessionStore;
 @property (strong, nonatomic) BugsnagSessionTrackingApiClient *apiClient;
 @property (strong, nonatomic) NSDate *backgroundStartTime;
-@property (nonatomic) NSString *codeBundleId;
+
 @property (strong, readwrite) BugsnagSession *currentSession;
 
 /**
@@ -81,11 +50,6 @@ NSString *const BSGSessionUpdateNotification = @"BugsnagSessionChanged";
         _sessionStore = [BugsnagSessionFileStore storeWithPath:storePath];
     }
     return self;
-}
-
-- (void)setCodeBundleId:(NSString *)codeBundleId {
-    _codeBundleId = codeBundleId;
-    _apiClient.codeBundleId = codeBundleId;
 }
 
 #pragma mark - Creating and sending a new session
@@ -138,22 +102,11 @@ NSString *const BSGSessionUpdateNotification = @"BugsnagSessionChanged";
         return;
     }
 
-    NSDictionary *systemInfo = [BSG_KSSystemInfo systemInfo];
-    BugsnagApp *app = [BugsnagApp appWithDictionary:@{@"system": systemInfo} config:self.config codeBundleId:self.codeBundleId];
-    BugsnagDevice *device = [BugsnagDevice deviceWithDictionary:@{@"system": systemInfo}];
-    BugsnagSession *newSession = [[BugsnagSession alloc] initWithId:[[NSUUID UUID] UUIDString]
-                                                          startDate:[NSDate date]
-                                                               user:self.config.user
-                                                       autoCaptured:isAutoCaptured
-                                                                app:app
-                                                             device:device];
+    self.currentSession = [[BugsnagSession alloc] initWithId:[[NSUUID UUID] UUIDString]
+                                                   startDate:[NSDate date]
+                                                        user:self.config.currentUser
+                                                autoCaptured:isAutoCaptured];
 
-    for (BugsnagOnSessionBlock onSessionBlock in self.config.onSessionBlocks) {
-        if (!onSessionBlock(newSession)) {
-            return;
-        }
-    }
-    self.currentSession = newSession;
     [self.sessionStore write:self.currentSession];
 
     if (self.callback) {
@@ -176,9 +129,7 @@ NSString *const BSGSessionUpdateNotification = @"BugsnagSessionChanged";
                                                        startDate:startedAt
                                                             user:user
                                                     handledCount:handledCount
-                                                  unhandledCount:unhandledCount
-                                                             app:[BugsnagApp new]
-                                                          device:[BugsnagDevice new]];
+                                                  unhandledCount:unhandledCount];
     }
     if (self.callback) {
         self.callback(self.currentSession);
